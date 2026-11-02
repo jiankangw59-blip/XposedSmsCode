@@ -36,6 +36,8 @@ internal class SmsInboxObserver(
             // A row-specific provider change can return an old unread message.
             // Validate at this host boundary before it reaches automated actions.
             if (!deliveryGuard.deliver(record.date) { observedSmsHandler.handle(record) }) {
+                // Preserve per-row SIM metadata repair without replaying code actions.
+                observedSmsHandler.repairRouting(record)
                 XLog.w(message = "Diag observer skip: stale or invalid date sms_id=%d", record.smsId)
             }
         },
