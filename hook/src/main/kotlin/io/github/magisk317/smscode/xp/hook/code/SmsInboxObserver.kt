@@ -19,6 +19,7 @@ internal class SmsInboxObserver(
     private val phoneContext: Context,
 ) {
     private val queryExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    private val deliveryGuard = ObservedSmsDeliveryGuard(RECENT_SMS_WINDOW_MS)
     private val observedSmsHandler = ObservedSmsHandler(
         pluginContext = pluginContext,
         phoneContext = phoneContext,
@@ -31,7 +32,13 @@ internal class SmsInboxObserver(
     private val delegate = SharedSmsInboxObserver(
         pluginContext = pluginContext,
         phoneContext = phoneContext,
-        recordHandler = { record -> observedSmsHandler.handle(record) },
+        recordHandler = { record ->
+            // A row-specific provider change can return an old unread message.
+            // Validate at this host boundary before it reaches automated actions.
+            if (!deliveryGuard.deliver(record.date) { observedSmsHandler.handle(record) }) {
+                XLog.w(message = "Diag observer skip: stale or invalid date sms_id=%d", record.smsId)
+            }
+        },
         capabilities = XscHookHostCapabilities,
     )
 
@@ -42,5 +49,11 @@ internal class SmsInboxObserver(
 
     fun unregister() {
         delegate.unregister()
+    }
+
+    private companion object {
+        // Match the shared observer's recent-message window. Its separate
+        // 24-hour routing-repair callback deliberately bypasses this guard.
+        const val RECENT_SMS_WINDOW_MS = 10 * 60 * 1000L
     }
 }
